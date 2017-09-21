@@ -1,1 +1,1 @@
-add_lunch_combo lineage_x3-userdebug
+add_lunch_combo aicp_x3-userdebug
