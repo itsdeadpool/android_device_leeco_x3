@@ -1,47 +1,227 @@
-From 7426ca178ff8f0fef503e354643a88b929f0b0f6 Mon Sep 17 00:00:00 2001
-From: DeckerSU <support@decker.su>
-Date: Mon, 20 Feb 2017 03:59:41 +0300
-Subject: [PATCH] wifi tethering fix
-
-- standart wlan0 -> ap0 change
-- Revert "Don't start tethering if IPv6 RPF is not supported." patch (thx to olegsvs)
-
-Change-Id: I3fb6a1db4c0ff6c3ecae95ec5c11ca485a465934
----
- server/NatController.cpp    | 4 +++-
- server/SoftapController.cpp | 6 ++++--
- 2 files changed, 7 insertions(+), 3 deletions(-)
-
 diff --git a/server/NatController.cpp b/server/NatController.cpp
-index cda8f5f..c966a11 100644
+index 8b4ee11..dab3561 100644
 --- a/server/NatController.cpp
 +++ b/server/NatController.cpp
-@@ -376,7 +376,9 @@ int NatController::setForwardRules(bool add, const char *intIface, const char *e
+@@ -376,6 +376,7 @@ int NatController::setForwardRules(bool add, const char *intIface, const char *e
          goto err_return;
      }
  
--    if (runCmd(ARRAY_SIZE(cmd4), cmd4) && add) {
 +    // Revert "Don't start tethering if IPv6 RPF is not supported."
-+    // STOPSHIP: Make this an error.
-+    if (runCmd(ARRAY_SIZE(cmd4), cmd4) && add && false /* STOPSHIP */) {
+     // STOPSHIP: Make this an error.
+     if (runCmd(ARRAY_SIZE(cmd4), cmd4) && add && false /* STOPSHIP */) {
          rc = -1;
-         goto err_rpfilter;
+@@ -414,3 +415,4 @@ int NatController::disableNat(const char* intIface, const char* extIface) {
      }
+     return 0;
+ }
++
+diff --git a/server/NatController.h b/server/NatController.h
+index 939f09d..cb3cbb5 100644
+--- a/server/NatController.h
++++ b/server/NatController.h
+@@ -1,3 +1,4 @@
++
+ /*
+  * Copyright (C) 2008 The Android Open Source Project
+  *
 diff --git a/server/SoftapController.cpp b/server/SoftapController.cpp
-index 1c59ec3..2e6d05c 100755
+index 7e99cf3..969fe8a 100644
 --- a/server/SoftapController.cpp
 +++ b/server/SoftapController.cpp
-@@ -54,7 +54,8 @@ using android::base::WriteStringToFile;
- #endif
+@@ -43,12 +43,25 @@
+ #include "ResponseCode.h"
  
- #ifdef LIBWPA_CLIENT_EXISTS
--std:: string hostapd_unix_file(StringPrintf("/data/misc/wifi/hostapd/wlan0"));
+ #include "SoftapController.h"
++#include <dirent.h>
+ 
+ using android::base::StringPrintf;
+ using android::base::WriteStringToFile;
+ 
++#ifdef LIBWPA_CLIENT_EXISTS
++#include <dirent.h>
++#include "wpa_ctrl.h"
++#endif
++
 +//std:: string hostapd_unix_file(StringPrintf("/data/misc/wifi/hostapd/wlan0"));
 +  std:: string hostapd_unix_file(StringPrintf("/data/misc/wifi/hostapd/ap0"));
- static const char HOSTAPD_DHCP_DIR[]    = "/data/misc/dhcp";
- #endif
++#ifdef LIBWPA_CLIENT_EXISTS
++static const char HOSTAPD_DHCP_DIR[]    = "/data/misc/dhcp";
++#endif
  static const char HOSTAPD_CONF_FILE[]    = "/data/misc/wifi/hostapd.conf";
-@@ -289,7 +290,8 @@ int SoftapController::setSoftap(int argc, char *argv[]) {
+ static const char HOSTAPD_BIN_FILE[]    = "/system/bin/hostapd";
++static const char HOSTAPD_SOCKETS_DIR[]    = "/data/misc/wifi/sockets";
++static const char WIFI_HOSTAPD_GLOBAL_CTRL_IFACE[] = "/data/misc/wifi/hostapd/global";
+ 
+ SoftapController::SoftapController()
+     : mPid(0) {}
+@@ -56,9 +69,97 @@ SoftapController::SoftapController()
+ SoftapController::~SoftapController() {
+ }
+ 
+-int SoftapController::startSoftap() {
++#ifdef LIBWPA_CLIENT_EXISTS
++void *SoftapController::threadStart(void *obj){
++    SoftapController *me = reinterpret_cast<SoftapController *>(obj);
++    struct wpa_ctrl *ctrl;
++    int count = 0;
++
++    ALOGD("SoftapController::threadStart...");
++
++    DIR *dir = NULL;
++
++    dir = opendir(HOSTAPD_SOCKETS_DIR);
++    if (NULL == dir && errno == ENOENT) {
++        mkdir(HOSTAPD_SOCKETS_DIR, S_IRWXU|S_IRWXG|S_IRWXO);
++        chown(HOSTAPD_SOCKETS_DIR, AID_WIFI, AID_WIFI);
++        chmod(HOSTAPD_SOCKETS_DIR, S_IRWXU|S_IRWXG);
++    } else {
++         if (dir != NULL) { /* Directory already exists */
++             ALOGD("%s already exists", HOSTAPD_SOCKETS_DIR);
++             closedir(dir);
++         }
++         if (errno == EACCES) {
++             ALOGE("Cant open %s , check permissions ", HOSTAPD_SOCKETS_DIR);
++         }
++    }
++    chmod(HOSTAPD_DHCP_DIR, S_IRWXU|S_IRWXG|S_IRWXO);
++
++    ctrl = wpa_ctrl_open(hostapd_unix_file.c_str());
++    while (ctrl == NULL) {
++        /*
++         * Try to connect to hostapd via wpa_ctrl interface.
++         * During conneciton process, it is possible that hostapd
++         * has station connected to it.
++         * Set sleep time to a appropriate value to lower the
++         * ratio that miss the STA-CONNECTED msg from hostapd
++         */
++        usleep(20000);
++        ctrl = wpa_ctrl_open(hostapd_unix_file.c_str());
++        if (ctrl != NULL || count >= 150) {
++            break;
++        }
++        count ++;
++    }
++    if (count == 150 && ctrl == NULL) {
++        ALOGE("Connection to hostapd Error.");
++        return NULL;
++    }
++
++    if (wpa_ctrl_attach(ctrl) != 0) {
++        wpa_ctrl_close(ctrl);
++        ALOGE("Attach to hostapd Error.");
++        return NULL;
++    }
++
++    while (me->mHostapdFlag) {
++        int res = 0;
++        char buf[256];
++        char dest_str[300];
++        while (wpa_ctrl_pending(ctrl)) {
++            size_t len = sizeof(buf) - 1;
++            res = wpa_ctrl_recv(ctrl, buf, &len);
++            if (res == 0) {
++                buf[len] = '\0';
++                ALOGD("Get event from hostapd (%s)", buf);
++                memset(dest_str, 0x0, sizeof(dest_str));
++                snprintf(dest_str, sizeof(dest_str), "IfaceMessage active %s", buf);
++                me->mSocketClient->sendMsg(ResponseCode::InterfaceMessage, dest_str, false);
++            } else {
++                break;
++            }
++        }
++
++        if (res < 0) {
++            break;
++        }
++        sleep(2);
++    }
++
++    wpa_ctrl_detach(ctrl);
++    wpa_ctrl_close(ctrl);
++
++    return NULL;
++}
++#endif
++
++int SoftapController::startSoftap(bool global_ctrl_iface, SocketClient *socketClient,
++    const char *ifname) {
+     pid_t pid = 1;
++    DIR *dir = NULL;
++    int ret;
+ 
++    mSocketClient = socketClient;
+     if (mPid) {
+         ALOGE("SoftAP is already running");
+         return ResponseCode::SoftapStatusResult;
+@@ -75,9 +176,17 @@ int SoftapController::startSoftap() {
+ 
+     if (!pid) {
+         ensure_entropy_file_exists();
+-        if (execl(HOSTAPD_BIN_FILE, HOSTAPD_BIN_FILE,
+-                  "-e", WIFI_ENTROPY_FILE,
+-                  HOSTAPD_CONF_FILE, (char *) NULL)) {
++        if (global_ctrl_iface) {
++            ret = execl(HOSTAPD_BIN_FILE, HOSTAPD_BIN_FILE,
++                        "-e", WIFI_ENTROPY_FILE, "-ddd",
++                        "-g", WIFI_HOSTAPD_GLOBAL_CTRL_IFACE,
++                        HOSTAPD_CONF_FILE, (char *)NULL);
++        } else {
++            ret = execl(HOSTAPD_BIN_FILE, HOSTAPD_BIN_FILE,
++                        "-e", WIFI_ENTROPY_FILE, HOSTAPD_CONF_FILE,
++                        (char *)NULL);
++        }
++        if (ret) {
+             ALOGE("execl failed (%s)", strerror(errno));
+         }
+         ALOGE("SoftAP failed to start");
+@@ -86,6 +195,32 @@ int SoftapController::startSoftap() {
+         mPid = pid;
+         ALOGD("SoftAP started successfully");
+         usleep(AP_BSS_START_DELAY);
++        dir = opendir(HOSTAPD_SOCKETS_DIR);
++        if (NULL == dir && errno == ENOENT) {
++            mkdir(HOSTAPD_SOCKETS_DIR, S_IRWXU|S_IRWXG|S_IRWXO);
++            chown(HOSTAPD_SOCKETS_DIR, AID_WIFI, AID_WIFI);
++            chmod(HOSTAPD_SOCKETS_DIR, S_IRWXU|S_IRWXG);
++        } else {
++            if (dir != NULL) { /* Directory already exists */
++                ALOGD("%s already exists", HOSTAPD_SOCKETS_DIR);
++                closedir(dir);
++            }
++            if (errno == EACCES) {
++                ALOGE("Cant open %s , check permissions ", HOSTAPD_SOCKETS_DIR);
++            }
++        }
++        if (ifname != NULL) {
++            std:: string wbuf(StringPrintf("/data/misc/wifi/hostapd/%s",ifname));
++            hostapd_unix_file = wbuf;
++        }
++#ifdef LIBWPA_CLIENT_EXISTS
++        mHostapdFlag = true;
++        if (mSocketClient != NULL) {
++            if ((mThreadErr = pthread_create(&mThread, NULL, SoftapController::threadStart, this)) != 0) {
++                ALOGE("pthread_create failed for hostapd listen socket (%s)", strerror(errno));
++            }
++        }
++#endif
+     }
+     return ResponseCode::SoftapStatusResult;
+ }
+@@ -97,6 +232,13 @@ int SoftapController::stopSoftap() {
+         return ResponseCode::SoftapStatusResult;
+     }
+ 
++#ifdef LIBWPA_CLIENT_EXISTS
++    mHostapdFlag = false;
++    if (mThreadErr == 0) {
++        pthread_join(mThread, NULL);
++    }
++#endif
++
+     ALOGD("Stopping the SoftAP service...");
+     kill(mPid, SIGTERM);
+     waitpid(mPid, NULL, 0);
+@@ -148,7 +290,8 @@ int SoftapController::setSoftap(int argc, char *argv[]) {
              "hw_mode=%c\n"
              "ignore_broadcast_ssid=%d\n"
              "wowlan_triggers=any\n",
@@ -51,6 +231,42 @@ index 1c59ec3..2e6d05c 100755
  
      std::string fbuf;
      if (argc > 7) {
--- 
-2.7.4
-
+diff --git a/server/SoftapController.h b/server/SoftapController.h
+index 68025e2..a1abffd 100644
+--- a/server/SoftapController.h
++++ b/server/SoftapController.h
+@@ -20,6 +20,9 @@
+ #include <linux/in.h>
+ #include <net/if.h>
+ 
++#include <sysutils/SocketListener.h>
++#include <sys/socket.h>
++
+ #define SOFTAP_MAX_BUFFER_SIZE	4096
+ #define AP_BSS_START_DELAY	200000
+ #define AP_BSS_STOP_DELAY	500000
+@@ -32,14 +35,23 @@ public:
+     SoftapController();
+     virtual ~SoftapController();
+ 
+-    int startSoftap();
++    int startSoftap(bool global_ctrl_iface = false, SocketClient *socketClient = NULL, const char *iface = NULL);
+     int stopSoftap();
+     bool isSoftapStarted();
+     int setSoftap(int argc, char *argv[]);
+     int fwReloadSoftap(int argc, char *argv[]);
+ private:
++    SocketClient *mSocketClient;
++#ifdef LIBWPA_CLIENT_EXISTS
++    pthread_t mThread;
++    int mThreadErr;
++    bool mHostapdFlag;
++#endif
+     pid_t mPid;
+     bool generatePsk(char *ssid, char *passphrase, char *psk);
++#ifdef LIBWPA_CLIENT_EXISTS
++    static void *threadStart(void *obj);
++#endif
+ };
+ 
+ #endif
