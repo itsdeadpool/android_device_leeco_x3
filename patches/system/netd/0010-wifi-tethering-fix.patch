@@ -16,15 +16,6 @@ index 8b4ee11..dab3561 100644
      return 0;
  }
 +
-diff --git a/server/NatController.h b/server/NatController.h
-index 939f09d..cb3cbb5 100644
---- a/server/NatController.h
-+++ b/server/NatController.h
-@@ -1,3 +1,4 @@
-+
- /*
-  * Copyright (C) 2008 The Android Open Source Project
-  *
 diff --git a/server/SoftapController.cpp b/server/SoftapController.cpp
 index 7e99cf3..969fe8a 100644
 --- a/server/SoftapController.cpp
