@@ -6,9 +6,10 @@ index 8b4ee11..dab3561 100644
          goto err_return;
      }
  
-+    // Revert "Don't start tethering if IPv6 RPF is not supported."
-     // STOPSHIP: Make this an error.
-     if (runCmd(ARRAY_SIZE(cmd4), cmd4) && add && false /* STOPSHIP */) {
+-    if (runCmd(ARRAY_SIZE(cmd4), cmd4) && add) {		
++    // Revert "Don't start tethering if IPv6 RPF is not supported."		  +    // Revert "Don't start tethering if IPv6 RPF is not supported."
++    // STOPSHIP: Make this an error.		 +     // STOPSHIP: Make this an error.
++    if (runCmd(ARRAY_SIZE(cmd4), cmd4) && add && false /* STOPSHIP */) {
          rc = -1;
 @@ -414,3 +415,4 @@ int NatController::disableNat(const char* intIface, const char* extIface) {
      }
