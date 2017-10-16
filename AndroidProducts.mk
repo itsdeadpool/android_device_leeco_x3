@@ -1,0 +1,2 @@
+PRODUCT_MAKEFILES := \
+	$(LOCAL_DIR)/pure_x3.mk
