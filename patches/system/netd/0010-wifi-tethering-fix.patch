@@ -11,11 +11,6 @@ index 8b4ee11..dab3561 100644
 +    // STOPSHIP: Make this an error.
 +    if (runCmd(ARRAY_SIZE(cmd4), cmd4) && add && false /* STOPSHIP */) {
          rc = -1;
-@@ -414,3 +415,4 @@ int NatController::disableNat(const char* intIface, const char* extIface) {
-     }
-     return 0;
- }
-+
 diff --git a/server/SoftapController.cpp b/server/SoftapController.cpp
 index 7e99cf3..969fe8a 100644
 --- a/server/SoftapController.cpp
