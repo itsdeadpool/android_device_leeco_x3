@@ -8,9 +8,8 @@ $(call inherit-product, $(SRC_TARGET_DIR)/product/full_base_telephony.mk)
 # Inherit device configuration
 $(call inherit-product, $(LOCAL_PATH)/device.mk)
 
-# Inherit some common PN stuff.
-$(call inherit-product, vendor/pure/configs/pure_phone.mk)
-$(call inherit-product, vendor/pure/configs/pure_main.mk)
+# Inherit some common PA stuff.
+$(call inherit-product, vendor/leeco/x3/x3-vendor.mk)
 
 # Device display
 TARGET_SCREEN_HEIGHT := 1920
@@ -20,7 +19,7 @@ TARGET_SCREEN_WIDTH := 1080
 BOARD_VENDOR := LeEco
 PRODUCT_BRAND := LeEco
 PRODUCT_DEVICE := x3
-PRODUCT_NAME := pure_x3
+PRODUCT_NAME := pa_x3
 PRODUCT_MANUFACTURER := LeEco
 PRODUCT_MODEL := Le 1s
 TARGET_VENDOR := LeEco
