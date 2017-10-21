@@ -1,1 +1,1 @@
-add_lunch_combo pure_x3-userdebug
+add_lunch_combo pa_x3-userdebug
